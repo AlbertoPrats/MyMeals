@@ -1,0 +1,16 @@
+{
+  "name": "mymeals",
+  "private": true,
+  "type": "module",
+  "description": "Meal-prep web app that runs entirely on the phone (installable PWA).",
+  "scripts": {
+    "build:recipes": "node tools/build-recipes.mjs",
+    "check:recipes": "node tools/build-recipes.mjs --check",
+    "serve": "node tools/serve.mjs",
+    "test": "node --test tests/core/*.test.js",
+    "test:e2e": "node --test tests/e2e/*.test.js"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}
