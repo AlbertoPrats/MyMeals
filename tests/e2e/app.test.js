@@ -28,6 +28,23 @@ async function shot(name) {
 
 const orbCount = () => page.locator(".orb .orb-count").textContent();
 
+/**
+ * Re-read until `ok(value)` holds. count() and allTextContents() don't wait,
+ * and a page appears a moment after a tab/link changes the URL.
+ */
+async function settled(read, ok, timeout = 5000) {
+  const end = Date.now() + timeout;
+  let value = await read();
+  while (!ok(value) && Date.now() < end) {
+    await page.waitForTimeout(50);
+    value = await read();
+  }
+  return value;
+}
+const countOf = (selector, ok) => settled(() => page.locator(selector).count(), ok);
+const textsOf = (selector, expected) =>
+  settled(() => page.locator(selector).allTextContents(), (v) => JSON.stringify(v) === JSON.stringify(expected));
+
 const sheet = () => page.locator(".sheet");
 
 before(async () => {
@@ -64,12 +81,12 @@ test("main page shows the week and both meal slots", async () => {
 test("adding a 4-serving recipe from the filtered list shows the orb", async () => {
   await page.getByRole("button", { name: /Añadir comida el 19 oct/ }).click();
   await sheet().getByRole("button", { name: "Legumbres", exact: true }).click();
-  const names = await sheet().locator(".list-item .item-name").allTextContents();
+  const names = await settled(() => sheet().locator(".list-item .item-name").allTextContents(), (v) => v.length === 8);
   assert.equal(names.length, 8);
   await shot("02-picker-legumbres");
   await sheet().getByRole("button", { name: /Chili con carne y alubias/ }).click();
   await page.locator(".toast", { hasText: "Quedan 3 raciones" }).waitFor();
-  assert.equal(await page.locator(".sheet").count(), 0);
+  assert.equal(await countOf(".sheet", (n) => n === 0), 0);
   assert.equal(await orbCount(), "3");
   assert.match(await page.locator(".meal-row").first().textContent(), /Cocinar 4 raciones/);
   await shot("03-week-with-orb");
@@ -83,7 +100,7 @@ test("spare rations are offered first for the next meal", async () => {
   await shot("04-picker-leftovers");
   await first.click();
   assert.equal(await orbCount(), "2");
-  assert.equal(await page.locator(".meal-row .badge.leftover").count(), 1);
+  assert.equal(await countOf(".meal-row .badge.leftover", (n) => n === 1), 1);
 });
 
 test("creating a new meal leaves it as unknown", async () => {
@@ -144,18 +161,18 @@ test("prep page: create, autofill, cook list and shopping list", async () => {
   await page.getByRole("button", { name: /Autocompletar 8 huecos/ }).click();
   await sheet().getByRole("button", { name: "Autocompletar" }).click();
   await page.locator(".toast", { hasText: "comidas añadidas" }).waitFor();
-  assert.equal(await page.locator(".prep-day").count(), 4);
-  assert.equal(await page.locator(".prep-page .slot-empty").count(), 0);
-  assert.ok(await page.locator(".balance-row").count());
+  assert.equal(await countOf(".prep-day", (n) => n === 4), 4);
+  assert.equal(await countOf(".prep-page .slot-empty", (n) => n === 0), 0);
+  assert.ok(await countOf(".balance-row", (n) => n > 0));
   await shot("10-prep-plan");
 
   await page.getByRole("tab", { name: "Cocinar" }).click();
-  assert.ok((await page.locator(".prep-page .list-item").count()) >= 2);
+  assert.ok((await countOf(".prep-page .list-item", (n) => n >= 2)) >= 2);
   await shot("11-prep-cook");
 
   await page.getByRole("tab", { name: "Compra" }).click();
   const items = page.locator(".shop-item");
-  assert.ok((await items.count()) > 5);
+  assert.ok((await countOf(".shop-item", (n) => n > 5)) > 5);
   const firstName = await items.first().locator(".item-name").textContent();
   await items.first().locator("input").click();
   await page.locator(".shop-item.checked").first().waitFor();
@@ -170,7 +187,7 @@ test("data survives a reload (saved on the device)", async () => {
   await page.getByRole("link", { name: "Semana" }).click();
   assert.match(await page.locator(".meal-row").first().textContent(), /Chili con carne y alubias/);
   await page.getByRole("link", { name: "Recetas" }).click();
-  assert.ok(await page.getByRole("link", { name: /Crema de calabaza/ }).count());
+  await page.getByRole("link", { name: /Crema de calabaza/ }).waitFor();
 });
 
 test("settings: add a meal slot", async () => {
@@ -181,7 +198,7 @@ test("settings: add a meal slot", async () => {
   await page.getByRole("button", { name: "Subir Desayuno" }).click();
   await shot("13-settings");
   await page.getByRole("link", { name: "Semana" }).click();
-  assert.deepEqual(await page.locator(".slot-header h3").allTextContents(), ["Desayuno", "Comida", "Cena"]);
+  assert.deepEqual(await textsOf(".slot-header h3", ["Desayuno", "Comida", "Cena"]), ["Desayuno", "Comida", "Cena"]);
 });
 
 test("works offline once loaded", async (t) => {
@@ -202,9 +219,9 @@ test("works offline once loaded", async (t) => {
   try {
     await page.reload();
     await page.waitForSelector("body.ready");
-    assert.equal(await page.locator(".day-pill").count(), 7);
+    assert.equal(await countOf(".day-pill", (n) => n === 7), 7);
     await page.getByRole("link", { name: "Recetas" }).click();
-    assert.ok(await page.getByRole("link", { name: /Crema de calabaza/ }).count());
+    await page.getByRole("link", { name: /Crema de calabaza/ }).waitFor();
   } finally {
     server = await startServer(PORT);
   }
